@@ -17,9 +17,9 @@ import re
 # Configuración - API SECOP I (datos.gov.co) - Contratos grandes
 DATOS_GOV_API = "https://www.datos.gov.co/resource/rpmr-utcd.json"
 LIMIT_RESULTS = 20
-MIN_BUDGET = 0
-MAX_BUDGET = 1000000000  # Hasta 1 mil millones
-MIN_SCORE = 60  # Score mínimo para incluir en reporte
+MIN_BUDGET = 150000000  # 150 millones mínimo (obras más pequeñas)
+MAX_BUDGET = 2000000000  # 2 mil millones máximo (más flexible)
+MIN_SCORE = 55  # Score mínimo más permisivo para captar oportunidades variadas
 
 class LicitacionScorer:
     def __init__(self, company_profile: Dict, scoring_config: Dict):
@@ -38,26 +38,33 @@ class LicitacionScorer:
                 precio_str = str(precio_raw).replace(',', '').replace('.', '')
                 precio = int(precio_str) if precio_str.isdigit() else 0
             
-            # Filtro de presupuesto (0 a 1 mil millones)
+            # Filtro de presupuesto (150M a 2,000M)
             if precio < MIN_BUDGET or precio > MAX_BUDGET:
                 return False
             
-            # Filtro de fecha: últimos 90 días (más permisivo para SECOP I)
+            # Filtro de fecha: últimos 120 días (más permisivo para captar más oportunidades)
             fecha_pub = licitacion.get('fecha_de_firma_del_contrato', '')
             if fecha_pub:
                 from datetime import datetime, timedelta
                 try:
                     # Parsear fecha (formato ISO)
                     fecha_proceso = datetime.fromisoformat(fecha_pub.replace('Z', '+00:00').replace('T', ' ').split('.')[0])
-                    noventa_dias_atras = datetime.now() - timedelta(days=90)
-                    if fecha_proceso < noventa_dias_atras:
+                    ciento_veinte_dias_atras = datetime.now() - timedelta(days=120)
+                    if fecha_proceso < ciento_veinte_dias_atras:
                         return False
                 except:
                     pass  # Si no puede parsear, deja pasar
             
             # Verificar que requiera ejecución técnica (no solo consultoría pura)
             objeto = str(licitacion.get('objeto_del_proceso', '')).lower()
-            exclusiones_fuertes = ['estudio de factibilidad', 'asesoria juridica', 'consultoria sin ejecucion']
+            
+            # Exclusiones fuertes
+            exclusiones_fuertes = [
+                'transporte de material', 'transporte de pétreo', 'transporte de agregados',
+                'consultoria sin ejecucion', 'asesoria exclusivamente juridica',
+                'estudio de factibilidad sin ejecucion', 'minería', 'exploración minera',
+                'consultoria pura', 'solo estudios', 'solo asesoria'
+            ]
             if any(exc in objeto for exc in exclusiones_fuertes):
                 return False
                 
@@ -76,95 +83,130 @@ class LicitacionScorer:
         departamento = str(licitacion.get('departamento_entidad', '')).lower()
         modalidad = str(licitacion.get('modalidad_de_contrataci_n', '')).lower()
         
-        # 1. Afinidad técnica (40 puntos - más permisivo)
+        # 1. Afinidad técnica (40 puntos) - Eléctrico + Obras civiles
         tech_score = 0
-        # Alta prioridad - electricidad
-        if any(kw in objeto for kw in ['electrico', 'electricidad', 'instalacion electrica', 'instalaciones electricas', 'tablero', 'red electrica', 'cableado electrico']):
+        has_electric = False
+        has_civil = False
+        
+        # Media tensión - core del negocio (máxima prioridad)
+        if any(kw in objeto for kw in ['media tension', 'subestacion', 'transformador', 'redes de distribucion']):
+            tech_score += 20
+            details.append("Media tensión (+20)")
+            has_electric = True
+        
+        # Baja tensión y electricidad general
+        if any(kw in objeto for kw in ['baja tension', 'instalacion electrica', 'cableado estructurado', 
+                                       'tableros electricos', 'alumbrado publico', 'cajas de derivacion',
+                                       'puesta a tierra', 'red electrica', 'montaje electrico']):
             tech_score += 15
-            details.append("Electricidad (+15)")
-        # Media tensión
-        if any(kw in objeto for kw in ['media tension', 'subestacion', 'transformador', 'retie']):
+            details.append("Baja tensión/eléctrico (+15)")
+            has_electric = True
+        
+        # Pruebas técnicas especializadas
+        if any(kw in objeto for kw in ['pruebas vlf', 'termografia', 'aceite dielectrico']):
             tech_score += 12
-            details.append("Media tensión (+12)")
-        # Mantenimiento
-        if any(kw in objeto for kw in ['mantenimiento', 'preventivo', 'correctivo', 'reparacion']):
+            details.append("Pruebas técnicas (+12)")
+            has_electric = True
+        
+        # Canalización subterránea (especialidad específica)
+        if any(kw in objeto for kw in ['canalizacion subterranea', 'cajas cs276', 'cajas cs277', 'cajas cs280']):
             tech_score += 10
-            details.append("Mantenimiento (+10)")
-        # Obra civil y construcción
-        if any(kw in objeto for kw in ['construccion', 'obra civil', 'remodelacion', 'acabados', 'pañetado', 'pintura']):
-            tech_score += 10
-            details.append("Construcción (+10)")
+            details.append("Canalización subterránea (+10)")
+            has_electric = True
+        
         # HVAC
-        if any(kw in objeto for kw in ['aire acondicionado', 'hvac', 'extraccion', 'ventilacion', 'climatizacion']):
-            tech_score += 8
-            details.append("HVAC (+8)")
-        # Instalaciones generales
-        if any(kw in objeto for kw in ['instalacion', 'montaje', 'suministro e instalacion']):
-            tech_score += 6
-            details.append("Instalación (+6)")
-        # Redes y seguridad
-        if any(kw in objeto for kw in ['redes', 'cableado', 'cctv', 'seguridad electronica', 'camara']):
-            tech_score += 5
-            details.append("Redes/Seguridad (+5)")
+        if any(kw in objeto for kw in ['aire acondicionado', 'hvac', 'sistemas de extraccion', 'climatizacion']):
+            tech_score += 12
+            details.append("HVAC (+12)")
+        
+        # Obras civiles y construcción (importante para la empresa)
+        if any(kw in objeto for kw in ['cubiertas', 'fachadas', 'remodelacion', 'ampliaciones']):
+            if has_electric:
+                tech_score += 12
+                details.append("Remodelación con eléctrico (+12)")
+            else:
+                tech_score += 8
+                details.append("Remodelación/cubiertas/fachadas (+8)")
+            has_civil = True
+        
+        # Obra civil general (menor prioridad pero válida)
+        if any(kw in objeto for kw in ['obra civil', 'construccion', 'edificaciones comerciales', 'acabados']):
+            if not has_civil:  # Si no se contó ya
+                if has_electric:
+                    tech_score += 10
+                    details.append("Obra civil con eléctrico (+10)")
+                else:
+                    tech_score += 5
+                    details.append("Obra civil general (+5)")
+                has_civil = True
+        
+        # Mantenimiento (eléctrico o general)
+        if any(kw in objeto for kw in ['mantenimiento', 'preventivo', 'correctivo']):
+            if has_electric or has_civil:
+                tech_score += 6
+                details.append("Mantenimiento especializado (+6)")
+        
         score += min(tech_score, 40)
         
-        # 2. Alineación presupuestal (25 puntos - aumentado)
+        # 2. Alineación presupuestal (25 puntos)
         try:
             precio_raw = licitacion.get('valor_contrato', '0')
             if isinstance(precio_raw, (int, float)):
                 precio = int(precio_raw)
             else:
                 precio = int(str(precio_raw).replace(',', '').replace('.', ''))
-            target_min = self.company['financial_profile']['target_contract_value_min_cop']
-            target_max = self.company['financial_profile']['target_contract_value_max_cop']
             
-            if target_min <= precio <= target_max:
+            # Rango ideal: 400M-600M (+25)
+            # Rango aceptable: 300M-800M (+18)
+            # Fuera de rango: +5
+            if 400000000 <= precio <= 600000000:
                 score += 25
-                details.append("Presupuesto óptimo (+25)")
-            elif precio * 0.7 <= target_min or precio <= target_max * 1.3:
+                details.append("Presupuesto óptimo 400M-600M (+25)")
+            elif 300000000 <= precio <= 800000000:
                 score += 18
-                details.append("Presupuesto aceptable (+18)")
+                details.append("Presupuesto aceptable 300M-800M (+18)")
             elif precio > 0:
-                score += 10
-                details.append("Presupuesto válido (+10)")
+                score += 5
+                details.append("Presupuesto válido (+5)")
         except:
             pass
         
-        # 3. Geográfico (15 puntos - aumentado)
-        if 'bogotá' in departamento or 'bogota' in departamento:
-            score += 15
-            details.append("Bogotá (+15)")
-        elif 'cundinamarca' in departamento:
-            score += 12
-            details.append("Cundinamarca (+12)")
+        # 3. Geográfico (20 puntos) - Bogotá y Cundinamarca cercano
+        depto_lower = departamento.lower()
+        if 'bogotá' in depto_lower or 'bogota' in depto_lower or 'distrito capital' in depto_lower:
+            score += 20
+            details.append("Bogotá D.C. (+20)")
+        elif 'cundinamarca' in depto_lower:
+            score += 18  # Aumentado - Cundinamarca es viable
+            details.append("Cundinamarca cercano (+18)")
         elif self.company['geographical_scope']['national_coverage']:
-            score += 10
-            details.append("Nacional (+10)")
+            score += 3
+            details.append("Nacional (+3)")
         
-        # 4. Modalidad (10 puntos)
+        # 4. Tipo de entidad (10 puntos)
+        if any(e in entidad for e in ['epm', 'isa', 'codensa', 'electrificadora', 'energía']):
+            score += 10
+            details.append("Empresa energía (+10)")
+        elif any(e in entidad for e in ['distrital', 'secretaría', 'alcaldía bogotá', 'idrd', 'umv']):
+            score += 8
+            details.append("Entidad distrital Bogotá (+8)")
+        elif any(e in entidad for e in ['industria', 'fábrica', 'comercial', 'centro comercial']):
+            score += 6
+            details.append("Sector industrial/comercial (+6)")
+        elif any(e in entidad for e in ['invias', 'ministerio', 'nacional']):
+            score += 3
+            details.append("Entidad nacional (+3)")
+        
+        # 5. Modalidad (5 puntos)
         if 'licitación pública' in modalidad:
-            score += 10
-            details.append("Licitación pública (+10)")
+            score += 5
+            details.append("Licitación pública (+5)")
         elif 'selección abreviada' in modalidad:
-            score += 8
-            details.append("Selección abreviada (+8)")
-        elif 'mínima cuantía' in modalidad:
-            score += 5
-            details.append("Mínima cuantía (+5)")
-        
-        # 5. Tipo de entidad (10 puntos)
-        if any(e in entidad for e in ['energía', 'electrificadora', 'eepm', 'enel']):
-            score += 10
-            details.append("Sector energía (+10)")
-        elif any(e in entidad for e in ['infraestructura', 'metro', 'transmilenio']):
-            score += 8
-            details.append("Infraestructura (+8)")
-        elif any(e in entidad for e in ['industria', 'fábrica', 'empresa']):
-            score += 7
-            details.append("Industrial (+7)")
-        elif any(e in entidad for e in ['distrital', 'secretaría', 'alcaldía']):
-            score += 5
-            details.append("Entidad pública (+5)")
+            score += 4
+            details.append("Selección abreviada (+4)")
+        elif any(m in modalidad for m in ['menor cuantía', 'mínima cuantía']):
+            score += 2
+            details.append("Menor cuantía (+2)")
         
         # 6. Keywords adicionales (bono)
         keyword_matches = sum(1 for kw in self.keywords if kw in objeto)
@@ -183,13 +225,13 @@ class LicitacionScorer:
         return min(score, 100), priority, details
 
 def fetch_licitaciones() -> List[Dict]:
-    """Consulta API de datos.gov.co / SECOP I - Contratos grandes"""
+    """Consulta API de datos.gov.co / SECOP I - Contratos en Bogotá y Cundinamarca (150M-2,000M)"""
     try:
-        # Consultar contratos recientes (últimos 90 días)
+        # Consultar contratos en Bogotá y Cundinamarca, rango amplio
         params = {
             "$limit": 100,
             "$order": "fecha_de_firma_del_contrato DESC",
-            "$where": "valor_contrato >= 150000000 AND valor_contrato <= 1000000000",
+            "$where": "valor_contrato >= 150000000 AND valor_contrato <= 2000000000 AND (departamento_entidad = 'Distrito Capital de Bogotá' OR departamento_entidad = 'Cundinamarca')",
         }
         
         response = requests.get(
