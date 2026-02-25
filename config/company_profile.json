@@ -1,0 +1,149 @@
+{
+  "company_metadata": {
+    "legal_name": "SD SOLUCIONES INTEGRALES DE INGENIERIA S.A.S.",
+    "commercial_name": "SD Soluciones Integrales de Ingeniería",
+    "legal_type": "S.A.S.",
+    "country": "Colombia",
+    "department": "Bogotá D.C.",
+    "city": "Bogotá",
+    "nit": "901429350",
+    "years_in_operation": 7,
+    "legal_representative": "Joseph Arturo Sanchez Pedroza",
+    "accounting_obligation": true,
+    "vat_responsible": true,
+    "electronic_invoicing": true
+  },
+  "financial_profile": {
+    "target_contract_value_min_cop": 300000000,
+    "target_contract_value_max_cop": 500000000,
+    "flexibility_percentage": 0.2,
+    "ideal_contract_value_cop": 400000000,
+    "risk_tolerance_level": "moderate",
+    "preferred_payment_terms_days_max": 60
+  },
+  "geographical_scope": {
+    "primary_region": "Bogotá D.C.",
+    "secondary_regions": ["Cundinamarca"],
+    "national_coverage": true,
+    "rural_projects": true,
+    "urban_projects": true
+  },
+  "core_business_lines": [
+    {
+      "category": "Media Tensión",
+      "priority_weight": 1.0,
+      "services": [
+        "Diseño redes media tensión",
+        "Construcción redes aéreas",
+        "Instalación transformadores",
+        "Subestaciones eléctricas",
+        "Canalización subterránea",
+        "Pruebas VLF",
+        "RETIE cumplimiento",
+        "Termografía infrarroja"
+      ]
+    },
+    {
+      "category": "Electricidad",
+      "priority_weight": 0.95,
+      "services": [
+        "Instalaciones eléctricas industriales",
+        "UPS",
+        "Plantas eléctricas",
+        "Puestas a tierra",
+        "Tableros eléctricos",
+        "Mantenimiento eléctrico"
+      ]
+    },
+    {
+      "category": "Construcción",
+      "priority_weight": 0.85,
+      "services": [
+        "Obras civiles",
+        "Edificaciones comerciales",
+        "Cubiertas",
+        "Fachadas",
+        "Impermeabilización",
+        "Ampliaciones"
+      ]
+    },
+    {
+      "category": "Aire Acondicionado y Extracción",
+      "priority_weight": 0.8,
+      "services": [
+        "Instalación HVAC",
+        "Sistemas de extracción industrial",
+        "Mantenimiento HVAC"
+      ]
+    },
+    {
+      "category": "Redes y Telecomunicaciones",
+      "priority_weight": 0.75,
+      "services": [
+        "Redes LAN/WAN",
+        "Fibra óptica",
+        "CCTV",
+        "Telefonía IP",
+        "Control de acceso",
+        "Firewalls",
+        "VPN"
+      ]
+    },
+    {
+      "category": "Mantenimiento Industrial",
+      "priority_weight": 0.9,
+      "services": [
+        "Mantenimiento preventivo",
+        "Mantenimiento correctivo",
+        "Automatización",
+        "Paneles solares",
+        "Optimización industrial"
+      ]
+    }
+  ],
+  "certifications_and_compliance": {
+    "retie_compliance": true,
+    "electrical_safety_standards": true,
+    "quality_focus": true,
+    "environmental_focus": true
+  },
+  "strategic_preferences": {
+    "preferred_entities": [
+      "Empresas de energía",
+      "Infraestructura urbana",
+      "Metro",
+      "Entidades distritales",
+      "Empresas industriales"
+    ],
+    "excluded_project_types": [
+      "Consultorías puras sin ejecución",
+      "Proyectos exclusivamente jurídicos",
+      "Servicios no técnicos"
+    ],
+    "preferred_contract_modalities": [
+      "Licitación pública",
+      "Selección abreviada",
+      "Mínima cuantía alta"
+    ]
+  },
+  "keyword_vector": [
+    "media tension",
+    "subestacion electrica",
+    "transformadores",
+    "retie",
+    "red electrica",
+    "canalizacion",
+    "obra civil electrica",
+    "mantenimiento industrial",
+    "cableado estructurado",
+    "aire acondicionado industrial",
+    "circuito cerrado television",
+    "ups",
+    "planta electrica"
+  ],
+  "automatic_exclusion_rules": {
+    "max_budget_cap_cop": 800000000,
+    "min_budget_floor_cop": 150000000,
+    "require_technical_execution": true
+  }
+}
