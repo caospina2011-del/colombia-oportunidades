@@ -31,8 +31,8 @@ class LicitacionScorer:
     def apply_hard_filters(self, licitacion: Dict) -> bool:
         """Filtros duros antes de análisis semántico"""
         try:
-            # Extraer presupuesto (manejar diferentes formatos)
-            precio_raw = licitacion.get('precio_estimado', '0')
+            # Extraer presupuesto (campo: precio_base)
+            precio_raw = licitacion.get('precio_base', '0')
             if isinstance(precio_raw, (int, float)):
                 precio = int(precio_raw)
             else:
@@ -44,8 +44,8 @@ class LicitacionScorer:
                 return False
             
             # Verificar que requiera ejecución técnica (no solo consultoría)
-            objeto = str(licitacion.get('objeto_del_proceso', '')).lower()
-            if 'consultoría' in objeto and 'ejecución' not in objeto:
+            objeto = str(licitacion.get('descripci_n_del_procedimiento', '')).lower()
+            if 'consultor' in objeto and 'ejecuc' not in objeto:
                 return False
                 
             return True
@@ -58,8 +58,8 @@ class LicitacionScorer:
         score = 0
         details = []
         
-        objeto = str(licitacion.get('objeto_del_proceso', '')).lower()
-        entidad = str(licitacion.get('nombre_entidad', '')).lower()
+        objeto = str(licitacion.get('descripci_n_del_procedimiento', '')).lower()
+        entidad = str(licitacion.get('entidad', '')).lower()
         departamento = str(licitacion.get('departamento_entidad', '')).lower()
         modalidad = str(licitacion.get('modalidad_de_contratacion', '')).lower()
         
@@ -84,8 +84,11 @@ class LicitacionScorer:
         
         # 2. Alineación presupuestal (20 puntos)
         try:
-            precio_str = str(licitacion.get('precio_estimado', '0')).replace(',', '').replace('.', '')
-            precio = int(precio_str)
+            precio_raw = licitacion.get('precio_base', '0')
+            if isinstance(precio_raw, (int, float)):
+                precio = int(precio_raw)
+            else:
+                precio = int(str(precio_raw).replace(',', '').replace('.', ''))
             target_min = self.company['financial_profile']['target_contract_value_min_cop']
             target_max = self.company['financial_profile']['target_contract_value_max_cop']
             
@@ -153,11 +156,10 @@ class LicitacionScorer:
 def fetch_licitaciones() -> List[Dict]:
     """Consulta API de datos.gov.co / SECOP II"""
     try:
-        # Usar parámetros simples de Socrata
+        # Consulta simple sin filtros complejos (filtramos después)
         params = {
-            "$where": f"precio_estimado >= {MIN_BUDGET} AND precio_estimado <= {MAX_BUDGET}",
-            "$order": "fecha_de_publicacion_del_proceso DESC",
-            "$limit": LIMIT_RESULTS,
+            "$limit": 100,
+            "$order": "fecha_de_publicacion_del DESC",
         }
         
         response = requests.get(
@@ -169,19 +171,7 @@ def fetch_licitaciones() -> List[Dict]:
         return response.json()
     except Exception as e:
         print(f"Error consultando API: {e}")
-        print("Intentando endpoint alternativo...")
-        try:
-            # Fallback: consulta más simple sin filtros de precio (filtraremos después)
-            response = requests.get(
-                DATOS_GOV_API,
-                params={"$limit": 50, "$order": "fecha_de_publicacion_del_proceso DESC"},
-                timeout=30
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e2:
-            print(f"Error en fallback: {e2}")
-            return []
+        return []
 
 def generate_html_report(licitaciones_scored: List[tuple], run_date: str) -> str:
     """Genera reporte HTML ordenado por score"""
@@ -220,11 +210,12 @@ def generate_html_report(licitaciones_scored: List[tuple], run_date: str) -> str
     """
     
     for lic, score, priority, details in sorted_results:
-        proc_id = lic.get('proceso_de_compra', 'N/A')
-        objeto = lic.get('objeto_del_proceso', 'Sin descripción')
-        entidad = lic.get('nombre_entidad', 'Sin entidad')
-        precio = lic.get('precio_estimado', '0')
-        url = lic.get('url_proceso_en_secop_i', '#')
+        proc_id = lic.get('id_del_proceso', 'N/A')
+        objeto = lic.get('descripci_n_del_procedimiento', 'Sin descripción')
+        entidad = lic.get('entidad', 'Sin entidad')
+        precio = lic.get('precio_base', '0')
+        url_data = lic.get('urlproceso', {})
+        url = url_data.get('url', '#') if isinstance(url_data, dict) else '#'
         modalidad = lic.get('modalidad_de_contratacion', 'No especificada')
         
         # Formatear precio
