@@ -14,12 +14,12 @@ from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any
 import re
 
-# Configuración - API SECOP II (datos.gov.co)
-DATOS_GOV_API = "https://www.datos.gov.co/resource/p6dx-8zbt.json"
+# Configuración - API SECOP I (datos.gov.co) - Contratos grandes
+DATOS_GOV_API = "https://www.datos.gov.co/resource/rpmr-utcd.json"
 LIMIT_RESULTS = 20
 MIN_BUDGET = 0
 MAX_BUDGET = 1000000000  # Hasta 1 mil millones
-MIN_SCORE = 70  # Score mínimo para incluir en reporte
+MIN_SCORE = 60  # Score mínimo para incluir en reporte
 
 class LicitacionScorer:
     def __init__(self, company_profile: Dict, scoring_config: Dict):
@@ -30,8 +30,8 @@ class LicitacionScorer:
     def apply_hard_filters(self, licitacion: Dict) -> bool:
         """Filtros duros antes de análisis semántico"""
         try:
-            # Extraer presupuesto (campo: precio_base)
-            precio_raw = licitacion.get('precio_base', '0')
+            # Extraer presupuesto (campo: valor_contrato en SECOP I)
+            precio_raw = licitacion.get('valor_contrato', '0')
             if isinstance(precio_raw, (int, float)):
                 precio = int(precio_raw)
             else:
@@ -42,22 +42,23 @@ class LicitacionScorer:
             if precio < MIN_BUDGET or precio > MAX_BUDGET:
                 return False
             
-            # Filtro de fecha: últimos 30 días (ampliado para capturar más oportunidades)
-            fecha_pub = licitacion.get('fecha_de_publicacion_del', '')
+            # Filtro de fecha: últimos 90 días (más permisivo para SECOP I)
+            fecha_pub = licitacion.get('fecha_de_firma_del_contrato', '')
             if fecha_pub:
                 from datetime import datetime, timedelta
                 try:
                     # Parsear fecha (formato ISO)
                     fecha_proceso = datetime.fromisoformat(fecha_pub.replace('Z', '+00:00').replace('T', ' ').split('.')[0])
-                    treinta_dias_atras = datetime.now() - timedelta(days=30)
-                    if fecha_proceso < treinta_dias_atras:
+                    noventa_dias_atras = datetime.now() - timedelta(days=90)
+                    if fecha_proceso < noventa_dias_atras:
                         return False
                 except:
                     pass  # Si no puede parsear, deja pasar
             
-            # Verificar que requiera ejecución técnica (no solo consultoría)
-            objeto = str(licitacion.get('descripci_n_del_procedimiento', '')).lower()
-            if 'consultor' in objeto and 'ejecuc' not in objeto:
+            # Verificar que requiera ejecución técnica (no solo consultoría pura)
+            objeto = str(licitacion.get('objeto_del_proceso', '')).lower()
+            exclusiones_fuertes = ['estudio de factibilidad', 'asesoria juridica', 'consultoria sin ejecucion']
+            if any(exc in objeto for exc in exclusiones_fuertes):
                 return False
                 
             return True
@@ -70,36 +71,46 @@ class LicitacionScorer:
         score = 0
         details = []
         
-        objeto = str(licitacion.get('descripci_n_del_procedimiento', '')).lower()
-        entidad = str(licitacion.get('entidad', '')).lower()
+        objeto = str(licitacion.get('objeto_del_proceso', '')).lower()
+        entidad = str(licitacion.get('nombre_de_la_entidad', '')).lower()
         departamento = str(licitacion.get('departamento_entidad', '')).lower()
-        modalidad = str(licitacion.get('modalidad_de_contratacion', '')).lower()
+        modalidad = str(licitacion.get('modalidad_de_contrataci_n', '')).lower()
         
-        # 1. Afinidad técnica (35 puntos - aumentado)
+        # 1. Afinidad técnica (40 puntos - más permisivo)
         tech_score = 0
-        if any(kw in objeto for kw in ['media tensión', 'subestación', 'transformador']):
+        # Alta prioridad - electricidad
+        if any(kw in objeto for kw in ['electrico', 'electricidad', 'instalacion electrica', 'instalaciones electricas', 'tablero', 'red electrica', 'cableado electrico']):
             tech_score += 15
-            details.append("Media tensión (+15)")
-        if any(kw in objeto for kw in ['eléctrico', 'electricidad', 'instalación eléctrica']):
+            details.append("Electricidad (+15)")
+        # Media tensión
+        if any(kw in objeto for kw in ['media tension', 'subestacion', 'transformador', 'retie']):
             tech_score += 12
-            details.append("Electricidad (+12)")
-        if any(kw in objeto for kw in ['mantenimiento', 'preventivo', 'correctivo']):
+            details.append("Media tensión (+12)")
+        # Mantenimiento
+        if any(kw in objeto for kw in ['mantenimiento', 'preventivo', 'correctivo', 'reparacion']):
             tech_score += 10
             details.append("Mantenimiento (+10)")
-        if any(kw in objeto for kw in ['construcción', 'obra civil']):
+        # Obra civil y construcción
+        if any(kw in objeto for kw in ['construccion', 'obra civil', 'remodelacion', 'acabados', 'pañetado', 'pintura']):
+            tech_score += 10
+            details.append("Construcción (+10)")
+        # HVAC
+        if any(kw in objeto for kw in ['aire acondicionado', 'hvac', 'extraccion', 'ventilacion', 'climatizacion']):
             tech_score += 8
-            details.append("Construcción (+8)")
-        if any(kw in objeto for kw in ['redes', 'telecomunicaciones', 'cableado']):
+            details.append("HVAC (+8)")
+        # Instalaciones generales
+        if any(kw in objeto for kw in ['instalacion', 'montaje', 'suministro e instalacion']):
             tech_score += 6
-            details.append("Telecom (+6)")
-        if any(kw in objeto for kw in ['aire acondicionado', 'hvac', 'extracción']):
-            tech_score += 6
-            details.append("HVAC (+6)")
-        score += min(tech_score, 35)
+            details.append("Instalación (+6)")
+        # Redes y seguridad
+        if any(kw in objeto for kw in ['redes', 'cableado', 'cctv', 'seguridad electronica', 'camara']):
+            tech_score += 5
+            details.append("Redes/Seguridad (+5)")
+        score += min(tech_score, 40)
         
         # 2. Alineación presupuestal (25 puntos - aumentado)
         try:
-            precio_raw = licitacion.get('precio_base', '0')
+            precio_raw = licitacion.get('valor_contrato', '0')
             if isinstance(precio_raw, (int, float)):
                 precio = int(precio_raw)
             else:
@@ -172,12 +183,13 @@ class LicitacionScorer:
         return min(score, 100), priority, details
 
 def fetch_licitaciones() -> List[Dict]:
-    """Consulta API de datos.gov.co / SECOP II"""
+    """Consulta API de datos.gov.co / SECOP I - Contratos grandes"""
     try:
-        # Consulta simple sin filtros complejos (filtramos después)
+        # Consultar contratos recientes (últimos 90 días)
         params = {
             "$limit": 100,
-            "$order": "fecha_de_publicacion_del DESC",
+            "$order": "fecha_de_firma_del_contrato DESC",
+            "$where": "valor_contrato >= 150000000 AND valor_contrato <= 1000000000",
         }
         
         response = requests.get(
@@ -228,13 +240,12 @@ def generate_html_report(licitaciones_scored: List[tuple], run_date: str) -> str
     """
     
     for lic, score, priority, details in sorted_results:
-        proc_id = lic.get('id_del_proceso', 'N/A')
-        objeto = lic.get('descripci_n_del_procedimiento', 'Sin descripción')
-        entidad = lic.get('entidad', 'Sin entidad')
-        precio = lic.get('precio_base', '0')
-        url_data = lic.get('urlproceso', {})
-        url = url_data.get('url', '#') if isinstance(url_data, dict) else '#'
-        modalidad = lic.get('modalidad_de_contratacion', 'No especificada')
+        proc_id = lic.get('numero_de_proceso', 'N/A')
+        objeto = lic.get('objeto_del_proceso', 'Sin descripción')
+        entidad = lic.get('nombre_de_la_entidad', 'Sin entidad')
+        precio = lic.get('valor_contrato', '0')
+        url = lic.get('url_contrato', '#')
+        modalidad = lic.get('modalidad_de_contrataci_n', 'No especificada')
         
         # Formatear precio
         try:
@@ -317,10 +328,10 @@ def main():
     for lic in licitaciones:
         if scorer.apply_hard_filters(lic):
             score, priority, details = scorer.calculate_score(lic)
-            # Solo incluir si score >= MIN_SCORE (70)
+            # Solo incluir si score >= MIN_SCORE (60)
             if score >= MIN_SCORE:
                 results.append((lic, score, priority, details))
-                print(f"  ✓ {lic.get('id_del_proceso', 'N/A')}: {score}/100 ({priority})")
+                print(f"  ✓ {lic.get('numero_de_proceso', 'N/A')}: {score}/100 ({priority})")
     
     print(f"\n🎯 {len(results)} oportunidades con score ≥{MIN_SCORE}")
     
