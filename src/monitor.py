@@ -16,11 +16,10 @@ import re
 
 # Configuración - API SECOP II (datos.gov.co)
 DATOS_GOV_API = "https://www.datos.gov.co/resource/p6dx-8zbt.json"
-# Endpoint alternativo directo
-SECOP_API = "https://www.datos.gov.co/resource/p6dx-8zbt.json"
 LIMIT_RESULTS = 20
-MIN_BUDGET = 150000000
-MAX_BUDGET = 800000000
+MIN_BUDGET = 0
+MAX_BUDGET = 1000000000  # Hasta 1 mil millones
+MIN_SCORE = 70  # Score mínimo para incluir en reporte
 
 class LicitacionScorer:
     def __init__(self, company_profile: Dict, scoring_config: Dict):
@@ -39,9 +38,22 @@ class LicitacionScorer:
                 precio_str = str(precio_raw).replace(',', '').replace('.', '')
                 precio = int(precio_str) if precio_str.isdigit() else 0
             
-            # Filtro de presupuesto
+            # Filtro de presupuesto (0 a 1 mil millones)
             if precio < MIN_BUDGET or precio > MAX_BUDGET:
                 return False
+            
+            # Filtro de fecha: últimos 30 días (ampliado para capturar más oportunidades)
+            fecha_pub = licitacion.get('fecha_de_publicacion_del', '')
+            if fecha_pub:
+                from datetime import datetime, timedelta
+                try:
+                    # Parsear fecha (formato ISO)
+                    fecha_proceso = datetime.fromisoformat(fecha_pub.replace('Z', '+00:00').replace('T', ' ').split('.')[0])
+                    treinta_dias_atras = datetime.now() - timedelta(days=30)
+                    if fecha_proceso < treinta_dias_atras:
+                        return False
+                except:
+                    pass  # Si no puede parsear, deja pasar
             
             # Verificar que requiera ejecución técnica (no solo consultoría)
             objeto = str(licitacion.get('descripci_n_del_procedimiento', '')).lower()
@@ -63,26 +75,29 @@ class LicitacionScorer:
         departamento = str(licitacion.get('departamento_entidad', '')).lower()
         modalidad = str(licitacion.get('modalidad_de_contratacion', '')).lower()
         
-        # 1. Afinidad técnica (30 puntos)
+        # 1. Afinidad técnica (35 puntos - aumentado)
         tech_score = 0
         if any(kw in objeto for kw in ['media tensión', 'subestación', 'transformador']):
-            tech_score += 10
-            details.append("Media tensión (+10)")
+            tech_score += 15
+            details.append("Media tensión (+15)")
         if any(kw in objeto for kw in ['eléctrico', 'electricidad', 'instalación eléctrica']):
-            tech_score += 8
-            details.append("Electricidad (+8)")
+            tech_score += 12
+            details.append("Electricidad (+12)")
         if any(kw in objeto for kw in ['mantenimiento', 'preventivo', 'correctivo']):
-            tech_score += 5
-            details.append("Mantenimiento (+5)")
+            tech_score += 10
+            details.append("Mantenimiento (+10)")
         if any(kw in objeto for kw in ['construcción', 'obra civil']):
-            tech_score += 4
-            details.append("Construcción (+4)")
+            tech_score += 8
+            details.append("Construcción (+8)")
         if any(kw in objeto for kw in ['redes', 'telecomunicaciones', 'cableado']):
-            tech_score += 3
-            details.append("Telecom (+3)")
-        score += min(tech_score, 30)
+            tech_score += 6
+            details.append("Telecom (+6)")
+        if any(kw in objeto for kw in ['aire acondicionado', 'hvac', 'extracción']):
+            tech_score += 6
+            details.append("HVAC (+6)")
+        score += min(tech_score, 35)
         
-        # 2. Alineación presupuestal (20 puntos)
+        # 2. Alineación presupuestal (25 puntos - aumentado)
         try:
             precio_raw = licitacion.get('precio_base', '0')
             if isinstance(precio_raw, (int, float)):
@@ -93,24 +108,27 @@ class LicitacionScorer:
             target_max = self.company['financial_profile']['target_contract_value_max_cop']
             
             if target_min <= precio <= target_max:
-                score += 20
-                details.append("Presupuesto óptimo (+20)")
-            elif precio * 0.8 <= target_min or precio <= target_max * 1.2:
-                score += 12
-                details.append("Presupuesto aceptable (+12)")
+                score += 25
+                details.append("Presupuesto óptimo (+25)")
+            elif precio * 0.7 <= target_min or precio <= target_max * 1.3:
+                score += 18
+                details.append("Presupuesto aceptable (+18)")
+            elif precio > 0:
+                score += 10
+                details.append("Presupuesto válido (+10)")
         except:
             pass
         
-        # 3. Geográfico (10 puntos)
-        if 'bogotá' in departamento:
-            score += 10
-            details.append("Bogotá (+10)")
+        # 3. Geográfico (15 puntos - aumentado)
+        if 'bogotá' in departamento or 'bogota' in departamento:
+            score += 15
+            details.append("Bogotá (+15)")
         elif 'cundinamarca' in departamento:
-            score += 8
-            details.append("Cundinamarca (+8)")
+            score += 12
+            details.append("Cundinamarca (+12)")
         elif self.company['geographical_scope']['national_coverage']:
-            score += 6
-            details.append("Nacional (+6)")
+            score += 10
+            details.append("Nacional (+10)")
         
         # 4. Modalidad (10 puntos)
         if 'licitación pública' in modalidad:
@@ -299,12 +317,15 @@ def main():
     for lic in licitaciones:
         if scorer.apply_hard_filters(lic):
             score, priority, details = scorer.calculate_score(lic)
-            results.append((lic, score, priority, details))
-            print(f"  ✓ {lic.get('proceso_de_compra', 'N/A')}: {score}/100 ({priority})")
+            # Solo incluir si score >= MIN_SCORE (70)
+            if score >= MIN_SCORE:
+                results.append((lic, score, priority, details))
+                print(f"  ✓ {lic.get('id_del_proceso', 'N/A')}: {score}/100 ({priority})")
     
-    print(f"\n🎯 {len(results)} oportunidades calificadas")
+    print(f"\n🎯 {len(results)} oportunidades con score ≥{MIN_SCORE}")
     
-    # Generar reporte
+    # Generar reporte (máximo 20 oportunidades)
+    results = results[:LIMIT_RESULTS]
     html_report = generate_html_report(results, run_date)
     
     # Guardar localmente
