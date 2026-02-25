@@ -14,8 +14,10 @@ from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any
 import re
 
-# Configuración
+# Configuración - API SECOP II (datos.gov.co)
 DATOS_GOV_API = "https://www.datos.gov.co/resource/p6dx-8zbt.json"
+# Endpoint alternativo directo
+SECOP_API = "https://www.datos.gov.co/resource/p6dx-8zbt.json"
 LIMIT_RESULTS = 20
 MIN_BUDGET = 150000000
 MAX_BUDGET = 800000000
@@ -29,9 +31,13 @@ class LicitacionScorer:
     def apply_hard_filters(self, licitacion: Dict) -> bool:
         """Filtros duros antes de análisis semántico"""
         try:
-            # Extraer presupuesto
-            precio_str = str(licitacion.get('precio_estimado', '0')).replace(',', '').replace('.', '')
-            precio = int(precio_str) if precio_str.isdigit() else 0
+            # Extraer presupuesto (manejar diferentes formatos)
+            precio_raw = licitacion.get('precio_estimado', '0')
+            if isinstance(precio_raw, (int, float)):
+                precio = int(precio_raw)
+            else:
+                precio_str = str(precio_raw).replace(',', '').replace('.', '')
+                precio = int(precio_str) if precio_str.isdigit() else 0
             
             # Filtro de presupuesto
             if precio < MIN_BUDGET or precio > MAX_BUDGET:
@@ -39,12 +45,12 @@ class LicitacionScorer:
             
             # Verificar que requiera ejecución técnica (no solo consultoría)
             objeto = str(licitacion.get('objeto_del_proceso', '')).lower()
-            exclusiones = ['consultoría', 'estudios de', 'asesoría', 'asesoria', 'elaboración de informes']
-            if all(exc in objeto for exc in ['consultoría']):
+            if 'consultoría' in objeto and 'ejecución' not in objeto:
                 return False
                 
             return True
-        except:
+        except Exception as e:
+            print(f"Error en filtro: {e}")
             return False
     
     def calculate_score(self, licitacion: Dict) -> tuple:
@@ -145,30 +151,37 @@ class LicitacionScorer:
         return min(score, 100), priority, details
 
 def fetch_licitaciones() -> List[Dict]:
-    """Consulta API de datos.gov.co"""
+    """Consulta API de datos.gov.co / SECOP II"""
     try:
-        # Consulta con filtros de presupuesto
-        query = f"""
-        SELECT proceso_de_compra, objeto_del_proceso, nombre_entidad, 
-               departamento_entidad, precio_estimado, modalidad_de_contratacion,
-               fecha_de_publicacion_del_proceso, url_proceso_en_secop_i
-        WHERE precio_estimado >= {MIN_BUDGET} 
-        AND precio_estimado <= {MAX_BUDGET}
-        AND estado_del_proceso = 'Activo'
-        ORDER BY fecha_de_publicacion_del_proceso DESC
-        LIMIT {LIMIT_RESULTS}
-        """
+        # Usar parámetros simples de Socrata
+        params = {
+            "$where": f"precio_estimado >= {MIN_BUDGET} AND precio_estimado <= {MAX_BUDGET}",
+            "$order": "fecha_de_publicacion_del_proceso DESC",
+            "$limit": LIMIT_RESULTS,
+        }
         
         response = requests.get(
             DATOS_GOV_API,
-            params={"$query": query},
+            params=params,
             timeout=30
         )
         response.raise_for_status()
         return response.json()
     except Exception as e:
         print(f"Error consultando API: {e}")
-        return []
+        print("Intentando endpoint alternativo...")
+        try:
+            # Fallback: consulta más simple sin filtros de precio (filtraremos después)
+            response = requests.get(
+                DATOS_GOV_API,
+                params={"$limit": 50, "$order": "fecha_de_publicacion_del_proceso DESC"},
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e2:
+            print(f"Error en fallback: {e2}")
+            return []
 
 def generate_html_report(licitaciones_scored: List[tuple], run_date: str) -> str:
     """Genera reporte HTML ordenado por score"""
