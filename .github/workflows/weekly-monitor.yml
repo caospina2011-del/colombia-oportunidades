@@ -1,10 +1,10 @@
 name: Monitoreo de Licitaciones Semanal
 
 on:
-  schedule:
-    # Ejecutar los lunes a las 8:00 AM (ajustar según preferencia)
-    - cron: '0 8 * * 1'
-  workflow_dispatch:  # Permite ejecución manual desde GitHub
+  # EJECUCIÓN AUTOMÁTICA DESACTIVADA - Solo manual
+  # schedule:
+  #   - cron: '0 8 * * 1'
+  workflow_dispatch:  # Solo ejecución manual desde GitHub
 
 jobs:
   monitor:
